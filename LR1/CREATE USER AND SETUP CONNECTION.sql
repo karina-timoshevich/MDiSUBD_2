@@ -1,0 +1,22 @@
+CREATE USER karina IDENTIFIED BY password;
+GRANT CONNECT, RESOURCE TO karina;
+ALTER USER karina DEFAULT TABLESPACE users;
+
+ALTER SESSION SET CURRENT_SCHEMA = karina;
+CONNECT karina/password;
+ALTER USER karina QUOTA UNLIMITED ON USERS;
+SELECT USER FROM dual;
+
+CREATE TABLE MyTable (
+    id NUMBER PRIMARY KEY,
+    val NUMBER
+);
+
+SELECT * FROM MyTable;
+SELECT table_name FROM user_tables;
+
+
+
+
+
+
