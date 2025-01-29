@@ -1,0 +1,19 @@
+# oracle database: express edition container configuration
+services:
+  oracle_database_express:
+    image: container-registry.oracle.com/database/express:latest
+    container_name: oracle_database_express
+    env_file:
+      - ./.env
+    volumes:
+      - oracledb-volume:/opt/oracle/oradata:rw
+    hostname: oracledbhost
+    restart: always
+    init: true
+    tty: true
+    ports:
+      - 1521:1521
+
+volumes:
+  oracledb-volume:
+    external: true
