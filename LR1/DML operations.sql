@@ -7,6 +7,15 @@ BEGIN
 END insert_into_mytable;
 /
 
+CREATE OR REPLACE PROCEDURE insert_into_mytable_inc (p_val IN NUMBER) IS
+    v_new_id NUMBER;
+BEGIN
+    SELECT NVL(MAX(id), 0) + 1 INTO v_new_id FROM MyTable;
+    INSERT INTO MyTable (id, val)
+    VALUES (v_new_id, p_val);
+    COMMIT;
+END insert_into_mytable_inc;
+/
 --EXEC insert_into_mytable(10002, 45);
 select val from MYTABLE where id = 10002;
 
