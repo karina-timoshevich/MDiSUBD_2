@@ -37,11 +37,11 @@ BEGIN
 END;
 /
 
-
 CREATE OR REPLACE TRIGGER trg_unique_student_id
-BEFORE INSERT OR UPDATE ON students
+BEFORE INSERT ON students
 FOR EACH ROW
 DECLARE
+    PRAGMA AUTONOMOUS_TRANSACTION;  
     v_count NUMBER;
 BEGIN
     SELECT COUNT(*) INTO v_count FROM students WHERE student_id = :NEW.student_id;
@@ -49,6 +49,7 @@ BEGIN
     IF v_count > 0 THEN
         RAISE_APPLICATION_ERROR(-20002, 'Ошибка: student_id должен быть уникальным');
     END IF;
+    COMMIT;  
 END;
 /
 
@@ -71,7 +72,7 @@ BEGIN
 END;
 /
 
-
+/*
 SELECT * FROM GROUPS;
 SELECT * FROM STUDENTS;
 --INSERT INTO groups (group_name) VALUES ('english');
@@ -84,5 +85,5 @@ SELECT * FROM GROUPS;
 SELECT * FROM STUDENTS;
 UPDATE groups SET group_id = 1 WHERE group_id = 2; -- Ошибка
 SELECT * FROM GROUPS;
-SELECT * FROM STUDENTS;
+SELECT * FROM STUDENTS;*/
 
