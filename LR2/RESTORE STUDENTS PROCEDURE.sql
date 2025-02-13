@@ -79,18 +79,33 @@ END;
 
 SELECT * FROM students;
 SELECT * FROM groups;
-DELETE FROM students WHERE student_id = 102;
+/*DELETE FROM students WHERE student_id = 102;
 DELETE FROM groups WHERE group_id = 41;
 SELECT * FROM groups WHERE group_id =41;
 SELECT * FROM students;
 SELECT * FROM groups;
-SELECT * FROM groups WHERE group_id =41;
+SELECT * FROM groups WHERE group_id =41;*/
 SET SERVEROUTPUT ON;
+/*BEGIN
+    restore_students_from_logs(NULL, INTERVAL '1' MINUTE);
+END;
+/
+*/
+SELECT * FROM groups WHERE group_id =222;
+SELECT * 
+FROM students_logs 
+WHERE action_time >= TIMESTAMP '2025-02-13 23:28:26' 
+  AND action_type = 'DELETE';
+
+BEGIN
+    restore_students_from_logs(TIMESTAMP '2025-02-13 23:28:26', NULL);
+END;
+/
 BEGIN
     restore_students_from_logs(NULL, INTERVAL '1' MINUTE);
 END;
 /
-SELECT * FROM groups WHERE group_id =41;
+SELECT * FROM groups WHERE group_id =222;
 SELECT * FROM students;
 SELECT * FROM groups;
 
