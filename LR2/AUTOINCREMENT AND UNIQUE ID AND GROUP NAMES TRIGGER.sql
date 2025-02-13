@@ -5,7 +5,10 @@ CREATE OR REPLACE TRIGGER trg_auto_group_id
 BEFORE INSERT ON groups
 FOR EACH ROW
 BEGIN
-    :NEW.group_id := seq_group_id.NEXTVAL;
+    -- Если group_id не передан явно, присваиваем автоинкрементное значение
+    IF :NEW.group_id IS NULL THEN
+        :NEW.group_id := seq_group_id.NEXTVAL;
+    END IF;
 END;
 /
 
@@ -13,9 +16,12 @@ CREATE OR REPLACE TRIGGER trg_auto_student_id
 BEFORE INSERT ON students
 FOR EACH ROW
 BEGIN
-    :NEW.student_id := seq_student_id.NEXTVAL;
+    IF :NEW.student_id IS NULL THEN
+   :NEW.student_id := seq_student_id.NEXTVAL;
+    END IF;
 END;
 /
+
 
 CREATE OR REPLACE TRIGGER trg_unique_group_id
 BEFORE INSERT OR UPDATE ON groups
