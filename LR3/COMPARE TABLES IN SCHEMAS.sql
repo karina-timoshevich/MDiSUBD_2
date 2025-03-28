@@ -23,6 +23,7 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
     TYPE table_tab IS TABLE OF table_rec;
     v_sorted_tables table_tab := table_tab();
 
+--все таблицы которые нужно создать или обновить в проде
     CURSOR object_diff_to_prod IS
         SELECT t.table_name as object_name
         FROM all_tables t
@@ -32,6 +33,7 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
         FROM all_tables t2
         WHERE t2.owner = UPPER(prod_schema_name)
         UNION
+        --сравнение структуры таблиц 
         SELECT tc1.table_name
         FROM (
             SELECT table_name,
@@ -49,6 +51,7 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
             GROUP BY table_name
         ) tc1;
 
+-- все таблицы, которые есть в проде и нет в леве
     CURSOR object_diff_to_drop IS
         SELECT t.table_name as object_name
         FROM all_tables t
@@ -81,6 +84,7 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
             END IF;
             IF NOT v_visited.EXISTS(p_table_name) THEN
                 v_temp_mark(p_table_name) := TRUE;
+                -- если p_table_name имеет завис от др таблицы – вызываем visit ей
                 FOR i IN 1..v_dependencies.COUNT LOOP
                     IF v_dependencies(i).table_name = p_table_name THEN
                         visit(v_dependencies(i).depends_on);
@@ -103,8 +107,10 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
         END LOOP;
         v_sorted_tables := v_tables;
         IF v_cycle_detected THEN
-            DBMS_OUTPUT.PUT_LINE('--------------------------------------------------');
-            DBMS_OUTPUT.PUT_LINE('Внимание: Обнаружены циклические зависимости!');
+            
+        DBMS_OUTPUT.PUT_LINE('======================================================');
+        DBMS_OUTPUT.PUT_LINE('======================================================');
+        DBMS_OUTPUT.PUT_LINE('Сообщение о находке циклических зависимостей');
         END IF;
     END topological_sort;
     
@@ -119,7 +125,7 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
         v_temp sort_rec;
         n PLS_INTEGER := v_sorted_tables.COUNT;
         
-        -- Функция для проверки, что таблица A зависит от таблицы B
+        -- проверка завис ли табл а от б
         FUNCTION has_dependency(a VARCHAR2, b VARCHAR2) RETURN BOOLEAN IS
         BEGIN
             FOR i IN 1..v_dependencies.COUNT LOOP
@@ -131,42 +137,41 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
         END;
         
     BEGIN
+        -- заполн массива v_sort
         FOR i IN 1..n LOOP
             v_sort(i).object_name := v_sorted_tables(i).object_name;
             v_sort(i).has_cycle   := v_sorted_tables(i).has_cycle;
             v_sort(i).dep_count   := 0;
             FOR j IN 1..v_dependencies.COUNT LOOP
                 IF v_dependencies(j).table_name = v_sorted_tables(i).object_name THEN
-                    v_sort(i).dep_count := v_sort(i).dep_count + 1;
+                    v_sort(i).dep_count := v_sort(i).dep_count + 1; -- подсчет кол-ва завис для кажд таблицы
                 END IF;
             END LOOP;
         END LOOP;
         
         FOR i IN 1..n-1 LOOP
             FOR j IN i+1..n LOOP
-                IF v_sort(i).has_cycle = v_sort(j).has_cycle THEN
-                    IF v_sort(i).has_cycle = FALSE THEN
+                IF v_sort(i).has_cycle = v_sort(j).has_cycle THEN -- чекнем одиаковый ли статус с циклами
+                    IF v_sort(i).has_cycle = FALSE THEN --если без цикла то по зависимстям
                         IF v_sort(i).dep_count > v_sort(j).dep_count THEN
                             v_temp := v_sort(i);
                             v_sort(i) := v_sort(j);
                             v_sort(j) := v_temp;
-                        ELSIF v_sort(i).dep_count = v_sort(j).dep_count THEN
-                            -- Если количество зависимостей одинаково, проверяем явную зависимость:
-                            -- если таблица v_sort(i) зависит от v_sort(j), то v_sort(j) должна идти раньше
-                            IF has_dependency(v_sort(i).object_name, v_sort(j).object_name) THEN
+                        ELSIF v_sort(i).dep_count = v_sort(j).dep_count THEN 
+                            IF has_dependency(v_sort(i).object_name, v_sort(j).object_name) THEN  -- если табл v_sort(i) завис от v_sort(j) то v_sort(j) будет раньше
                                 v_temp := v_sort(i);
                                 v_sort(i) := v_sort(j);
                                 v_sort(j) := v_temp;
                             END IF;
                         END IF;
-                    ELSE
-                        IF v_sort(i).dep_count < v_sort(j).dep_count THEN
+                    ELSE 
+                        IF v_sort(i).dep_count < v_sort(j).dep_count THEN -- по убыванию в случае циклов
                             v_temp := v_sort(i);
                             v_sort(i) := v_sort(j);
                             v_sort(j) := v_temp;
                         END IF;
                     END IF;
-                ELSIF v_sort(i).has_cycle = TRUE AND v_sort(j).has_cycle = FALSE THEN
+                ELSIF v_sort(i).has_cycle = TRUE AND v_sort(j).has_cycle = FALSE THEN --то табл без цикла раньше чем с
                     v_temp := v_sort(i);
                     v_sort(i) := v_sort(j);
                     v_sort(j) := v_temp;
@@ -183,7 +188,6 @@ CREATE OR REPLACE PROCEDURE compare_schemas (
 
     
 BEGIN
-    -- Проверка существования схем
     SELECT COUNT(*) INTO v_count FROM all_users WHERE username = UPPER(dev_schema_name);
     IF v_count = 0 THEN
         RAISE_APPLICATION_ERROR(-20001, 'Dev schema ' || dev_schema_name || ' not exists');
@@ -194,31 +198,31 @@ BEGIN
         RAISE_APPLICATION_ERROR(-20002, 'Prod schema ' || prod_schema_name || ' not exists');
     END IF;
     
-    -- Сбор зависимостей
+    -- сбор зависимостей по внеш ключам
     SELECT dep_rec(table_name, referenced_table_name)
     BULK COLLECT INTO v_dependencies
     FROM (
         SELECT DISTINCT
-            ac.table_name,
-            ac2.table_name as referenced_table_name
+            ac.table_name, -- табл которая содер внеш ключ
+            ac2.table_name as referenced_table_name -- имя табл на которую ссылается внешний ключ
         FROM all_constraints ac
         JOIN all_cons_columns acc ON ac.constraint_name = acc.constraint_name AND ac.owner = acc.owner
+        --ac.r_constraint_name — внеш ключ в одной таблице (имя родительского ограничения на кот ссылается текущ огран)
+        --ac2.constraint_name — первичный ключ в другой таблице
         JOIN all_constraints ac2 ON ac.r_constraint_name = ac2.constraint_name AND ac2.owner = ac.owner
         WHERE ac.owner = UPPER(dev_schema_name)
           AND ac.constraint_type = 'R'
-    );
+    ); -- информация, на что ссылается внешн ключ в текущ табл
     
-    -- Отладочный вывод различий
     DBMS_OUTPUT.PUT_LINE('Проверка object_diff_to_prod:');
     FOR rec IN object_diff_to_prod LOOP
         DBMS_OUTPUT.PUT_LINE('Объект: TABLE ' || rec.object_name);
     END LOOP;
     
-    -- Топологическая сортировка и обработка
     topological_sort;
     sort_tables;
     
-    -- Генерация DDL для таблиц
+    -- генерим DDL для таблиц
     FOR i IN 1..v_sorted_tables.COUNT LOOP
         DBMS_OUTPUT.PUT_LINE('[DEBUG] Обработка: TABLE ' || v_sorted_tables(i).object_name);
         IF v_sorted_tables(i).has_cycle THEN
@@ -247,7 +251,7 @@ BEGIN
             END IF;
             v_ddl := v_ddl || ',' || chr(10);
         END LOOP;
-        
+        -- генерация ограничений (pk fk)
         FOR cons IN (
             SELECT constraint_name, constraint_type, r_owner, r_constraint_name
             FROM all_constraints
@@ -299,7 +303,7 @@ BEGIN
                     ) LOOP
                         v_ddl := v_ddl || '"' || col.column_name || '",';
                     END LOOP;
-                    v_ddl := RTRIM(v_ddl, ',') || ')';
+                    v_ddl := RTRIM(v_ddl, ',') || ')'; -- лишнюю запятую скипаем
                 EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
                 END;
             END IF;
@@ -311,13 +315,13 @@ BEGIN
         DBMS_OUTPUT.PUT_LINE('/');
     END LOOP;
     
-    -- Удаление устаревших таблиц
+    --дроп тех, что нет в деве
     FOR rec IN object_diff_to_drop LOOP
         DBMS_OUTPUT.PUT_LINE('DROP TABLE "' || UPPER(prod_schema_name) || '"."' || rec.object_name || '";');
     END LOOP;
     
-    DBMS_OUTPUT.PUT_LINE('-- End of synchronization script');
-    DBMS_OUTPUT.PUT_LINE('-+------------------------------------------------+-');
+    DBMS_OUTPUT.PUT_LINE('======================================================');
+    DBMS_OUTPUT.PUT_LINE('======================================================');
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('Ошибка: ' || SQLERRM);
