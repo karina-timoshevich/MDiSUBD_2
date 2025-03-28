@@ -3,7 +3,7 @@ CREATE OR REPLACE PROCEDURE GENERATE_SYNC_SCRIPT(
     p_prod_schema VARCHAR2
 ) AUTHID CURRENT_USER IS
 
-    -- Улучшенная функция сравнения через DDL
+    -- Функция для улучшенного сравнения через DDL
     FUNCTION OBJECTS_DIFFERENT(
         p_object_name VARCHAR2,
         p_object_type VARCHAR2
@@ -28,6 +28,10 @@ CREATE OR REPLACE PROCEDURE GENERATE_SYNC_SCRIPT(
             WHEN OTHERS THEN
                 RETURN TRUE;
         END;
+
+        -- Удаляем ключевые слова, такие как 'EDITABLE', для сравнения
+        v_dev_ddl := REPLACE(v_dev_ddl, 'EDITIONABLE ', '');
+        v_prod_ddl := REPLACE(v_prod_ddl, 'EDITIONABLE ', '');
 
         RETURN v_dev_ddl <> v_prod_ddl;
     END;
@@ -111,53 +115,9 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('-- Target schema: ' || p_prod_schema);
     DBMS_OUTPUT.PUT_LINE('--------------------------------------------------');
 
-    -- Indexes (special handling)
-    DBMS_OUTPUT.PUT_LINE(CHR(10) || '/* INDEX DIFFERENCES */');
-    -- New indexes
-    FOR idx IN (
-        SELECT 
-            i.index_name, 
-            i.table_name, 
-            i.uniqueness, 
-            LISTAGG(c.column_name, ', ') WITHIN GROUP (ORDER BY c.column_position) AS idx_columns
-        FROM all_indexes i
-        JOIN all_ind_columns c 
-            ON i.owner = c.index_owner 
-            AND i.index_name = c.index_name
-        WHERE i.owner = p_dev_schema
-            AND i.index_name NOT LIKE '%_PK'
-            AND i.index_name NOT IN (
-                SELECT index_name 
-                FROM all_indexes 
-                WHERE owner = p_prod_schema
-            )
-        GROUP BY i.index_name, i.table_name, i.uniqueness
-    ) LOOP
-        DBMS_OUTPUT.PUT_LINE(
-            'CREATE ' || idx.uniqueness || ' INDEX ' || p_prod_schema || '.' || idx.index_name ||
-            ' ON ' || p_prod_schema || '.' || idx.table_name || '(' || idx.idx_columns || ');'
-        );
-    END LOOP;
-
-    -- Obsolete indexes
-    FOR idx IN (
-        SELECT index_name
-        FROM all_indexes
-        WHERE owner = p_prod_schema
-            AND index_name NOT LIKE '%_PK'
-            AND index_name NOT IN (
-                SELECT index_name 
-                FROM all_indexes 
-                WHERE owner = p_dev_schema
-            )
-    ) LOOP
-        DBMS_OUTPUT.PUT_LINE('DROP INDEX ' || p_prod_schema || '.' || idx.index_name || ';');
-    END LOOP;
-
     -- Process other object types
     PROCESS_OBJECTS('PROCEDURE');
     PROCESS_OBJECTS('FUNCTION');
-
 
     DBMS_OUTPUT.PUT_LINE(CHR(10) || '-- End of synchronization script');
     DBMS_OUTPUT.PUT_LINE('--------------------------------------------------');
