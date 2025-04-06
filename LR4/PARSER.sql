@@ -279,3 +279,66 @@ EXCEPTION
     RAISE_APPLICATION_ERROR(-20002, 'Ошибка формирования/выполнения запроса: ' || SQLERRM || '. SQL: ' || v_sql);
 END;
 /
+
+CREATE OR REPLACE FUNCTION json_ddl_handler(p_json CLOB) RETURN VARCHAR2 IS
+  v_sql      VARCHAR2(4000);
+  v_op       VARCHAR2(10);
+  v_result   VARCHAR2(200);
+  v_table    VARCHAR2(50);
+  v_columns  VARCHAR2(2000) := '';
+BEGIN
+  SELECT operation INTO v_op
+  FROM JSON_TABLE(p_json, '$'
+       COLUMNS (
+         operation VARCHAR2(10) PATH '$.operation'
+       )
+  );
+  
+  IF UPPER(v_op) = 'CREATE' THEN
+    SELECT table_name INTO v_table
+    FROM JSON_TABLE(p_json, '$'
+         COLUMNS (
+           table_name VARCHAR2(50) PATH '$.table'
+         )
+    );
+    
+    SELECT LISTAGG(col_definition, ', ') WITHIN GROUP (ORDER BY rn)
+      INTO v_columns
+    FROM (
+      SELECT ROWNUM rn,
+             column_name || ' ' || data_type AS col_definition
+      FROM JSON_TABLE(p_json, '$.columns[*]'
+           COLUMNS (
+             column_name VARCHAR2(50) PATH '$.name',
+             data_type   VARCHAR2(50) PATH '$.type'
+           )
+      )
+    );
+    
+    v_sql := 'CREATE TABLE ' || v_table || ' (' || v_columns || ')';
+    
+    EXECUTE IMMEDIATE v_sql;
+    v_result := 'Table "' || v_table || '" created successfully.';
+
+  ELSIF UPPER(v_op) = 'DROP' THEN
+    SELECT table_name INTO v_table
+    FROM JSON_TABLE(p_json, '$'
+         COLUMNS (
+           table_name VARCHAR2(50) PATH '$.table'
+         )
+    );
+    
+    v_sql := 'DROP TABLE ' || v_table;
+    EXECUTE IMMEDIATE v_sql;
+    v_result := 'Table "' || v_table || '" dropped successfully.';
+  ELSE
+    v_result := 'Unsupported DDL operation: ' || v_op;
+  END IF;
+  
+  RETURN v_result;
+  
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE_APPLICATION_ERROR(-20003, 'Ошибка DDL: ' || SQLERRM || '. SQL: ' || v_sql);
+END;
+/
