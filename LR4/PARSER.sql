@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION json_select_handler(p_json CLOB) RETURN SYS_REFCURSOR
   v_columns     VARCHAR2(1000);
   v_tables      VARCHAR2(1000);
   v_join_clause VARCHAR2(1000) := '';
-  v_where       VARCHAR2(1000) := '';
+  v_where       VARCHAR2(4000) := '';
   v_logical_op  VARCHAR2(5) := 'AND';
 BEGIN
   -- извлекаем колонки
@@ -12,12 +12,12 @@ BEGIN
   INTO v_columns
   FROM JSON_TABLE(p_json, '$.columns[*]' COLUMNS (column_name VARCHAR2(100) PATH '$'));
 
-  -- тут таблицы
+  -- извлекаем таблицы
   SELECT LISTAGG(table_name, ', ') 
   INTO v_tables
   FROM JSON_TABLE(p_json, '$.tables[*]' COLUMNS (table_name VARCHAR2(50) PATH '$'));
 
-  -- джоин формируем
+  -- формируем джоин
   BEGIN
     SELECT LISTAGG(jt.join_type || ' ' || jt.join_table || ' ON ' || jt.join_condition, ' ') 
     INTO v_join_clause
@@ -32,21 +32,49 @@ BEGIN
       v_join_clause := '';
   END;
 
-  -- where формируем
+  -- формируем where с подзапросами
   BEGIN
-    SELECT ' WHERE ' || LISTAGG(
-      condition_column || ' ' || condition_operator || ' ' || 
-      CASE 
-  WHEN REGEXP_LIKE(condition_value, '^\d+(\.\d+)?$') THEN condition_value 
-  ELSE '''' || REPLACE(condition_value, '''', '''''') || '''' 
-END, ' ' || v_logical_op || ' ') 
-    INTO v_where
-    FROM JSON_TABLE(p_json, '$.where.conditions[*]' 
-           COLUMNS (
-             condition_column VARCHAR2(50) PATH '$.column',
-             condition_operator VARCHAR2(10) PATH '$.operator',
-             condition_value VARCHAR2(100) PATH '$.value'
-           ));
+    FOR cond IN (
+      SELECT *
+      FROM JSON_TABLE(p_json, '$.where.conditions[*]'
+        COLUMNS (
+          condition_column     VARCHAR2(100) PATH '$.column',
+          condition_operator   VARCHAR2(20)  PATH '$.operator',
+          condition_value      VARCHAR2(100) PATH '$.value',
+          subquery_columns     CLOB          PATH '$.subquery.columns',
+          subquery_tables      CLOB          PATH '$.subquery.tables',
+          subquery_conditions  CLOB          PATH '$.subquery.conditions'
+        )
+      )
+    ) LOOP
+      IF cond.subquery_columns IS NOT NULL AND cond.subquery_tables IS NOT NULL THEN
+        DECLARE
+          v_subquery VARCHAR2(1000);
+        BEGIN
+          v_subquery := '(SELECT ' ||
+                        RTRIM(REPLACE(REPLACE(cond.subquery_columns, '["', ''), '"]', ''), '"') || 
+                        ' FROM ' || RTRIM(REPLACE(REPLACE(cond.subquery_tables, '["', ''), '"]', ''), '"');
+          IF cond.subquery_conditions IS NOT NULL THEN
+            v_subquery := v_subquery || ' WHERE ' || 
+                          RTRIM(REPLACE(REPLACE(cond.subquery_conditions, '["', ''), '"]', ''), '"');
+          END IF;
+
+          v_subquery := v_subquery || ')';
+
+          v_where := v_where || cond.condition_column || ' ' || cond.condition_operator || ' ' || v_subquery || ' ' || v_logical_op || ' ';
+        END;
+      ELSE
+        v_where := v_where || cond.condition_column || ' ' || cond.condition_operator || ' ' ||
+          CASE 
+            WHEN REGEXP_LIKE(cond.condition_value, '^\d+(\.\d+)?$') THEN cond.condition_value
+            ELSE '''' || REPLACE(cond.condition_value, '''', '''''') || ''''
+          END || ' ' || v_logical_op || ' ';
+      END IF;
+    END LOOP;
+
+    IF v_where IS NOT NULL THEN
+      v_where := ' WHERE ' || RTRIM(v_where, ' ' || v_logical_op || ' ');
+    END IF;
   EXCEPTION
     WHEN OTHERS THEN
       v_where := '';
