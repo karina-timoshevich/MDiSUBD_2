@@ -5,19 +5,19 @@ CREATE OR REPLACE FUNCTION json_select_handler(p_json CLOB) RETURN SYS_REFCURSOR
   v_tables      VARCHAR2(1000);
   v_join_clause VARCHAR2(1000) := '';
   v_where       VARCHAR2(4000) := '';
+  v_group_by    VARCHAR2(1000) := '';
   v_logical_op  VARCHAR2(5) := 'AND';
 BEGIN
-  -- извлекаем колонки
+  -- извлечение колонок
   SELECT LISTAGG(column_name, ', ') 
   INTO v_columns
   FROM JSON_TABLE(p_json, '$.columns[*]' COLUMNS (column_name VARCHAR2(100) PATH '$'));
 
-  -- извлекаем таблицы
+  --извлечение таблиц
   SELECT LISTAGG(table_name, ', ') 
   INTO v_tables
   FROM JSON_TABLE(p_json, '$.tables[*]' COLUMNS (table_name VARCHAR2(50) PATH '$'));
 
-  -- формируем джоин
   BEGIN
     SELECT LISTAGG(jt.join_type || ' ' || jt.join_table || ' ON ' || jt.join_condition, ' ') 
     INTO v_join_clause
@@ -32,7 +32,6 @@ BEGIN
       v_join_clause := '';
   END;
 
-  -- формируем where с подзапросами
   BEGIN
     FOR cond IN (
       SELECT *
@@ -58,9 +57,7 @@ BEGIN
             v_subquery := v_subquery || ' WHERE ' || 
                           RTRIM(REPLACE(REPLACE(cond.subquery_conditions, '["', ''), '"]', ''), '"');
           END IF;
-
           v_subquery := v_subquery || ')';
-
           v_where := v_where || cond.condition_column || ' ' || cond.condition_operator || ' ' || v_subquery || ' ' || v_logical_op || ' ';
         END;
       ELSE
@@ -71,7 +68,6 @@ BEGIN
           END || ' ' || v_logical_op || ' ';
       END IF;
     END LOOP;
-
     IF v_where IS NOT NULL THEN
       v_where := ' WHERE ' || RTRIM(v_where, ' ' || v_logical_op || ' ');
     END IF;
@@ -80,8 +76,20 @@ BEGIN
       v_where := '';
   END;
 
-  v_sql := 'SELECT ' || v_columns || ' FROM ' || v_tables || ' ' || v_join_clause || v_where;
+  BEGIN
+    SELECT LISTAGG(column_name, ', ')
+    INTO v_group_by
+    FROM JSON_TABLE(p_json, '$.group_by[*]' COLUMNS (column_name VARCHAR2(100) PATH '$'));
+  EXCEPTION
+    WHEN OTHERS THEN
+      v_group_by := '';
+  END;
 
+  v_sql := 'SELECT ' || v_columns || 
+           ' FROM ' || v_tables || 
+           ' ' || v_join_clause || 
+           v_where ||
+           CASE WHEN v_group_by IS NOT NULL THEN ' GROUP BY ' || v_group_by ELSE '' END;
   OPEN v_cur FOR v_sql;
   RETURN v_cur;
 EXCEPTION
