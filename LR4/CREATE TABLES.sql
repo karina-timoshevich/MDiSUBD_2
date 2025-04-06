@@ -20,5 +20,7 @@ INSERT INTO courses (course_id, course_name, instructor) VALUES (2, 'Физик�
 INSERT INTO students (student_id, first_name, course_id, grade) VALUES (1, 'Алексей', 1, 85);
 INSERT INTO students (student_id, first_name, course_id, grade) VALUES (2, 'Мария', 2, 92);
 INSERT INTO students (student_id, first_name, course_id, grade) VALUES (3, 'Дмитрий', 1, 78);
-
+INSERT INTO students (student_id, first_name, course_id, grade) VALUES (5, 'Евдокия', 1, 85);
+INSERT INTO students (student_id, first_name, course_id, grade) VALUES (6, 'Роман', 2, 87);
+INSERT INTO students (student_id, first_name, course_id, grade) VALUES (7, 'Федя', 1, 64);
 COMMIT;
