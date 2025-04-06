@@ -117,3 +117,105 @@ BEGIN
   CLOSE v_cur;
 END;
 /
+
+--тест селекта с нот ин
+DECLARE
+  v_json CLOB := '{
+    "operation": "SELECT",
+    "columns": ["first_name"],
+    "tables": ["students"],
+    "where": {
+      "conditions": [
+        {
+          "column": "course_id",
+          "operator": "NOT IN",
+          "subquery": {
+            "columns": "course_id",
+            "tables": "courses",
+            "conditions": "instructor = ''Иванов А.А.''"
+          }
+        }
+      ],
+      "logical_operator": "AND"
+    }
+  }';
+  v_cur SYS_REFCURSOR;
+  v_name students.first_name%TYPE;
+BEGIN
+  v_cur := json_select_handler(v_json);
+  LOOP
+    FETCH v_cur INTO v_name;
+    EXIT WHEN v_cur%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE(v_name);
+  END LOOP;
+  CLOSE v_cur;
+END;
+/
+
+--тест селекта с exists
+DECLARE
+  v_json CLOB := '{
+    "operation": "SELECT",
+    "columns": ["first_name"],
+    "tables": ["students"],
+    "where": {
+      "conditions": [
+        {
+          "column": "",
+          "operator": "EXISTS",
+          "subquery": {
+            "columns": "course_id",
+            "tables": "courses",
+            "conditions": "instructor = ''Петрова М.И.'' AND course_id = students.course_id"
+          }
+        }
+      ],
+      "logical_operator": "AND"
+    }
+  }';
+  v_cur SYS_REFCURSOR;
+  v_name students.first_name%TYPE;
+BEGIN
+  v_cur := json_select_handler(v_json);
+  LOOP
+    FETCH v_cur INTO v_name;
+    EXIT WHEN v_cur%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE(v_name);
+  END LOOP;
+  CLOSE v_cur;
+END;
+/
+
+--тест селекта с not exists
+DECLARE
+  v_json CLOB := '{
+    "operation": "SELECT",
+    "columns": ["first_name"],
+    "tables": ["students"],
+    "where": {
+      "conditions": [
+        {
+          "column": "",
+          "operator": "NOT EXISTS",
+          "subquery": {
+            "columns": "course_id",
+            "tables": "courses",
+            "conditions": "course_name = ''Физика'' AND course_id = students.course_id"
+          }
+        }
+      ],
+      "logical_operator": "AND"
+    }
+  }';
+  v_cur SYS_REFCURSOR;
+  v_name students.first_name%TYPE;
+BEGIN
+  v_cur := json_select_handler(v_json);
+  LOOP
+    FETCH v_cur INTO v_name;
+    EXIT WHEN v_cur%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE(v_name);
+  END LOOP;
+  CLOSE v_cur;
+END;
+/
