@@ -279,66 +279,108 @@ EXCEPTION
     RAISE_APPLICATION_ERROR(-20002, 'Ошибка формирования/выполнения запроса: ' || SQLERRM || '. SQL: ' || v_sql);
 END;
 /
-
 CREATE OR REPLACE FUNCTION json_ddl_handler(p_json CLOB) RETURN VARCHAR2 IS
-  v_sql      VARCHAR2(4000);
-  v_op       VARCHAR2(10);
-  v_result   VARCHAR2(200);
-  v_table    VARCHAR2(50);
-  v_columns  VARCHAR2(2000) := '';
+  v_sql           VARCHAR2(4000);
+  v_op            VARCHAR2(10);
+  v_result        VARCHAR2(200);
+  v_table         VARCHAR2(50);
+  v_columns       VARCHAR2(2000) := '';
+  v_foreign_keys  VARCHAR2(2000) := '';
+  v_primary_col   VARCHAR2(50);
 BEGIN
   SELECT operation INTO v_op
-  FROM JSON_TABLE(p_json, '$'
-       COLUMNS (
-         operation VARCHAR2(10) PATH '$.operation'
-       )
-  );
-  
+  FROM JSON_TABLE(p_json, '$' COLUMNS (operation VARCHAR2(10) PATH '$.operation'));
+
   IF UPPER(v_op) = 'CREATE' THEN
+    -- Извлечение имени таблицы
     SELECT table_name INTO v_table
-    FROM JSON_TABLE(p_json, '$'
-         COLUMNS (
-           table_name VARCHAR2(50) PATH '$.table'
-         )
-    );
-    
-    SELECT LISTAGG(col_definition, ', ') WITHIN GROUP (ORDER BY rn)
-      INTO v_columns
-    FROM (
-      SELECT ROWNUM rn,
-             column_name || ' ' || data_type AS col_definition
-      FROM JSON_TABLE(p_json, '$.columns[*]'
-           COLUMNS (
-             column_name VARCHAR2(50) PATH '$.name',
-             data_type   VARCHAR2(50) PATH '$.type'
-           )
+    FROM JSON_TABLE(p_json, '$' COLUMNS (table_name VARCHAR2(50) PATH '$.table'));
+
+    -- Формирование колонок
+    SELECT LISTAGG(
+      column_name || ' ' || data_type || ' ' || NVL(constraints, ''),
+      ', '
+    ) INTO v_columns
+    FROM JSON_TABLE(p_json, '$.columns[*]' 
+      COLUMNS (
+        column_name VARCHAR2(50) PATH '$.name',
+        data_type   VARCHAR2(50) PATH '$.type',
+        constraints VARCHAR2(100) PATH '$.constraints'
       )
     );
-    
-    v_sql := 'CREATE TABLE ' || v_table || ' (' || v_columns || ')';
-    
-    EXECUTE IMMEDIATE v_sql;
-    v_result := 'Table "' || v_table || '" created successfully.';
 
-  ELSIF UPPER(v_op) = 'DROP' THEN
-    SELECT table_name INTO v_table
-    FROM JSON_TABLE(p_json, '$'
-         COLUMNS (
-           table_name VARCHAR2(50) PATH '$.table'
-         )
+    -- Формирование FOREIGN KEYS
+    SELECT LISTAGG(
+      'CONSTRAINT fk_' || column_name || 
+      ' FOREIGN KEY (' || column_name || ') REFERENCES ' ||
+      ref_table || '(' || ref_column || ')',
+      ', '
+    ) INTO v_foreign_keys
+    FROM JSON_TABLE(p_json, '$.foreign_keys[*]'
+      COLUMNS (
+        column_name VARCHAR2(50) PATH '$.column',
+        ref_table   VARCHAR2(50) PATH '$.references.table',
+        ref_column  VARCHAR2(50) PATH '$.references.column'
+      )
     );
-    
-    v_sql := 'DROP TABLE ' || v_table;
+
+    -- Сборка полного SQL
+    v_sql := 'CREATE TABLE ' || v_table || ' (' || v_columns;
+    IF v_foreign_keys IS NOT NULL THEN
+      v_sql := v_sql || ', ' || v_foreign_keys;
+    END IF;
+    v_sql := v_sql || ')';
+
     EXECUTE IMMEDIATE v_sql;
-    v_result := 'Table "' || v_table || '" dropped successfully.';
-  ELSE
-    v_result := 'Unsupported DDL operation: ' || v_op;
+
+    -- Поиск первичного ключа для триггера
+    BEGIN
+      SELECT column_name INTO v_primary_col
+      FROM JSON_TABLE(p_json, '$.columns[*]'
+        COLUMNS (
+          column_name VARCHAR2(50) PATH '$.name',
+          constraints VARCHAR2(100) PATH '$.constraints'
+        )
+      )
+      WHERE UPPER(constraints) LIKE '%PRIMARY%KEY%' AND ROWNUM = 1;
+
+      IF v_primary_col IS NOT NULL THEN
+        EXECUTE IMMEDIATE 'CREATE SEQUENCE ' || v_table || '_seq START WITH 1 INCREMENT BY 1';
+        
+        v_sql := 'CREATE OR REPLACE TRIGGER trg_' || v_table || 
+                 ' BEFORE INSERT ON ' || v_table ||
+                 ' FOR EACH ROW BEGIN ' ||
+                 '   IF :NEW.' || v_primary_col || ' IS NULL THEN ' ||
+                 '     SELECT ' || v_table || '_seq.NEXTVAL INTO :NEW.' || v_primary_col || ' FROM DUAL;' ||
+                 '   END IF; END;';
+        EXECUTE IMMEDIATE v_sql;
+      END IF;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN NULL;
+    END;
+
+    v_result := 'Table ' || v_table || ' created';
+    
+  ELSIF UPPER(v_op) = 'DROP' THEN
+    -- Удаление с каскадом
+    SELECT table_name INTO v_table
+    FROM JSON_TABLE(p_json, '$' COLUMNS (table_name VARCHAR2(50) PATH '$.table'));
+
+    BEGIN
+      EXECUTE IMMEDIATE 'DROP TRIGGER trg_' || v_table;
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+      EXECUTE IMMEDIATE 'DROP SEQUENCE ' || v_table || '_seq';
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    EXECUTE IMMEDIATE 'DROP TABLE ' || v_table || ' CASCADE CONSTRAINTS';
+    v_result := 'Table ' || v_table || ' dropped';
   END IF;
-  
+
   RETURN v_result;
-  
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE_APPLICATION_ERROR(-20003, 'Ошибка DDL: ' || SQLERRM || '. SQL: ' || v_sql);
+    RETURN 'Error: ' || SQLERRM || ' (SQL: ' || v_sql || ')';
 END;
 /
