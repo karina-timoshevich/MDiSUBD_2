@@ -7,6 +7,7 @@ services:
       - ./.env
     volumes:
       - oracledb-volume:/opt/oracle/oradata:rw
+      - /c/reports:/opt/oracle/reports:rw 
     hostname: oracledbhost
     restart: always
     init: true
